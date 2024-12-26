@@ -13,7 +13,6 @@ export const DerivTrading = () => {
 
   useEffect(() => {
     const derivAPI = new DerivAPIService({ app_id: APP_ID });
-
     const initializeAPI = async () => {
       try {
         const response = await derivAPI.getActiveSymbols();
