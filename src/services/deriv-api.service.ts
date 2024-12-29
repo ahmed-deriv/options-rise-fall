@@ -21,7 +21,11 @@ export class DerivAPIService {
   constructor(config: DerivAPIConfig) {
     const endpoint = config.endpoint ?? "wss://ws.derivws.com/websockets/v3";
     this.connection = new WebSocket(endpoint + `?app_id=${config.app_id}`);
-    this.api = new DerivAPIBasic({ connection: this.connection });
+    this.api = new DerivAPIBasic({
+      connection: new WebSocket(
+        "wss://ws.derivws.com/websockets/v3?app_id=36300&l=EN&brand=deriv"
+      ),
+    });
     this.activeSubscriptions = new Map();
   }
 
@@ -30,19 +34,36 @@ export class DerivAPIService {
    * @param symbol - The trading symbol (e.g., "R_100")
    * @returns Promise resolving to tick subscription
    */
-  public async subscribeTicks(symbol: string): Promise<void> {
+  public async subscribeTicks(
+    request: any,
+    callback: (data: TickResponse) => void
+  ): Promise<void> {
+    console.log(request, "request");
     try {
-      const tickStream = await this.api.subscribe({
-        ticks: symbol,
-      });
+      // Unsubscribe from any existing tick subscriptions first
+      this.unsubscribeByPrefix("ticks_");
+
+      const tickStream = await this.api.subscribe(request);
+      console.log(tickStream, "tickStream");
 
       const subscription = tickStream.subscribe((response) => {
-        // Handle incoming tick data as TickResponse
-        const tickResponse = response as TickResponse;
-        console.log("Tick:", tickResponse);
+        try {
+          // Handle incoming tick data as TickResponse
+          const tickResponse = response as TickResponse;
+          console.log(response, "response from subscribe service ");
+
+          if (tickResponse.error) {
+            throw tickResponse.error;
+          }
+
+          callback(tickResponse);
+        } catch (error) {
+          console.error("Error in tick subscription:", error);
+          callback({ error } as TickResponse); // Pass error to callback
+        }
       });
 
-      this.activeSubscriptions.set(`ticks_${symbol}`, {
+      this.activeSubscriptions.set(`ticks_${request.ticks_history}`, {
         unsubscribe: () => subscription.unsubscribe(),
       });
     } catch (error) {
@@ -61,6 +82,14 @@ export class DerivAPIService {
         active_symbols: "brief",
         product_type: "basic",
       });
+    } catch (error) {
+      console.error("Error fetching active symbols:", error);
+      throw error;
+    }
+  }
+  public async sendRequest(request: any): Promise<any> {
+    try {
+      return await this.api.send(request);
     } catch (error) {
       console.error("Error fetching active symbols:", error);
       throw error;
@@ -133,5 +162,17 @@ export class DerivAPIService {
   public disconnect(): void {
     this.unsubscribeAll();
     this.connection.close();
+  }
+
+  /**
+   * Unsubscribe from subscriptions matching a prefix
+   */
+  private unsubscribeByPrefix(prefix: string): void {
+    for (const [key, subscription] of this.activeSubscriptions) {
+      if (key.startsWith(prefix)) {
+        subscription.unsubscribe();
+        this.activeSubscriptions.delete(key);
+      }
+    }
   }
 }
